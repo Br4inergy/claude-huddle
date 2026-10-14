@@ -1,0 +1,13 @@
+{
+  "name": "huddle",
+  "version": "0.1.0",
+  "description": "Huddle: when two or more Claude Code sessions work in the same repo, see it before they collide, and get them to split the work with one button.",
+  "author": {
+    "name": "Br4inergy",
+    "url": "https://github.com/Br4inergy"
+  },
+  "homepage": "https://github.com/Br4inergy/claude-huddle",
+  "repository": "https://github.com/Br4inergy/claude-huddle",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}
