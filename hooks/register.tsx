@@ -242,7 +242,7 @@ export const register: Register = on => {
     const repo = me.repoName
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" marginTop={1}>
         {list.slice(0, 3).map(a => (
           <Text color={LEVEL_COLOR[a.level]}>
             {LEVEL_MARK[a.level]} {a.level === 3 ? w.clash : w.otherAgent} {w.in} {repo} · {reasonOf(w, a)}
