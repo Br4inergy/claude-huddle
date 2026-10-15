@@ -7,6 +7,10 @@ export type Alert = {
   sessionId: string
   level: Level
   kind: AlertKind
+  /** The name the person sees for that session (its sidebar title), when it has one. */
+  title: string
+  /** The desktop app's id for that session, so the band can open it; empty outside the app. */
+  hostId: string
   task: string
   branch: string
   overlap: string[]

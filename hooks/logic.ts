@@ -11,6 +11,8 @@ export type Presence = {
   repoName: string
   branch: string
   task: string
+  title?: string
+  hostId?: string
   files: Record<string, number>
   startedAt: number
   lastSeen: number
@@ -68,6 +70,8 @@ export function assess(me: Presence, peer: Presence, now: number): Alert | null 
     sessionId: peer.sessionId,
     level,
     kind,
+    title: peer.title ?? '',
+    hostId: isHostId(peer.hostId) ? peer.hostId : '',
     task: peer.task,
     branch: peer.branch,
     overlap,
@@ -98,6 +102,15 @@ const list = (w: Words, xs: string[], max = 8) =>
 
 const quote = (w: Words, s: string) => (s ? `«${s}»` : w.noTask)
 
+/** How a session is named to the person: its sidebar title, else the start of what it was asked. */
+export const nameOf = (w: Words, p: { title?: string; task: string }) => (p.title ? `«${p.title}»` : quote(w, p.task))
+
+/** A desktop session id as the app spells it; anything else (from a peer's file) is never opened. */
+export const isHostId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(id)
+
+/** The desktop app's own link to a session, as its get_session answers it. */
+export const sessionLink = (hostId: string) => `claude://claude.ai/epitaxy/${hostId}`
+
 // What each peer session receives.
 export function peerMessage(w: Words, me: Presence, alert: Alert, now: number): string {
   return w.peerMessage({
@@ -105,7 +118,7 @@ export function peerMessage(w: Words, me: Presence, alert: Alert, now: number): 
     level: alert.level,
     reason: reasonOf(w, alert),
     id: me.sessionId,
-    task: quote(w, me.task),
+    task: nameOf(w, me),
     branch: me.branch,
     path: me.toplevel,
     files: list(w, recent(me.files, now)),
@@ -122,7 +135,7 @@ export function leadPrompt(w: Words, me: Presence, alerts: Alert[], sent: string
         id: a.sessionId,
         level: a.level,
         reason: reasonOf(w, a),
-        task: quote(w, a.task),
+        task: nameOf(w, a),
         branch: a.branch,
         clash: a.overlap.length ? list(w, a.overlap) : null,
         failed: !sent.includes(a.sessionId),

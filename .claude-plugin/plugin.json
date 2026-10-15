@@ -1,6 +1,6 @@
 {
   "name": "huddle",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Huddle: when two or more Claude Code sessions work in the same repo, see it before they collide, and get them to split the work with one button.",
   "author": {
     "name": "Br4inergy",

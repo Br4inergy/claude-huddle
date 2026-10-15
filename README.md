@@ -18,10 +18,12 @@ Huddle watches for that, tells you how bad it is, and when you press **Coordinat
 A band above the prompt, colored by how serious the overlap is:
 
 ```
-■ Clash in acme-api · both edited 2 files (src/auth.ts, src/session.ts) · «add SSO login» · feature/sso
-▲ Another agent in acme-api · same working copy (no worktree of its own) · «bump deps» · main
+■ Clash in acme-api · both edited 2 files (src/auth.ts, src/session.ts) · «SSO login» · feature/sso
+▲ Another agent in acme-api · same working copy (no worktree of its own) · «Dependency bumps» · main
 Coordinating is recommended.  [ Coordinate ]  [ Snooze 30 min ]
 ```
+
+Each other session is shown by the name you see in your sidebar (or, until it has one, by the start of what it was asked). In the Claude desktop app, click that name to jump to the session.
 
 Press **Coordinate** (or run `/huddle`) and:
 
@@ -65,10 +67,12 @@ The same repo is recognized across clones and worktrees by its `origin` remote (
 - Edits are tracked from Claude's file tools (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`). Files changed through shell commands don't count toward a clash.
 - It doesn't lock files or block edits. It warns and gets the agents talking.
 - Sessions on different machines don't see each other. The registry is local to your computer.
+- Jumping to a session by clicking its name works in the Claude desktop app. In a terminal the name is shown, not linked.
+- In the desktop app, a session reads its own sidebar title only where that read needs no permission prompt; otherwise the title arrives with your next prompt.
 
 ## Files
 
-Each session keeps one small JSON file under `~/.claude/huddle/sessions/` (its id, repo, working-copy path, branch, the first 140 characters of the first prompt you typed, and the repo-relative files it edited) and refreshes it every 15 seconds. A session gone for a day is emptied on the next check. Nothing leaves your machine except the messages Claude Code itself delivers between your own sessions.
+Each session keeps one small JSON file under `~/.claude/huddle/sessions/` (its id, the desktop app's id for it, its sidebar title, repo, working-copy path, branch, the first 140 characters of the first prompt you typed, and the repo-relative files it edited) and refreshes it every 15 seconds. A session gone for a day is emptied on the next check. Nothing leaves your machine except the messages Claude Code itself delivers between your own sessions.
 
 ## Language
 

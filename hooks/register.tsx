@@ -7,11 +7,14 @@ import {
   type Presence,
   assessAll,
   leadPrompt,
+  nameOf,
   normalizeRemote,
   peerMessage,
   reasonOf,
   repoRelative,
+  isHostId,
   sameAlerts,
+  sessionLink,
   slashes,
 } from './logic'
 
@@ -24,6 +27,9 @@ const SNOOZE_MS = 30 * 60_000
 const STALE_MS = 24 * 60 * 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const HUMAN_ORIGINS = new Set<string>(['composer', 'bridge', 'sdk'])
+// The desktop app's own read of a session: its sidebar title. Asked only when it runs without a permission prompt.
+const GET_SESSION = 'mcp__ccd_session_mgmt__get_session'
+const TITLE_EVERY = 4
 const LEVEL_MARK = { 1: '◦', 2: '▲', 3: '■' } as const
 const LEVEL_COLOR = { 1: 'subtle', 2: 'warning', 3: 'error' } as const
 
@@ -33,6 +39,7 @@ let dir = ''
 let w: Words = words('en')
 // Peer+level pairs already toasted, so an alert is raised once per escalation.
 const toasted = new Set<string>()
+let ticks = 0
 
 /** Claude Code's `language` setting, then LC_ALL/LANG; English by default. */
 async function detectLang($: Api): Promise<Lang> {
@@ -75,8 +82,36 @@ async function readPeers($: Api, now: number): Promise<Presence[]> {
   return peers
 }
 
+/** This session's sidebar title from the desktop app, when the app is there and lets it be read without asking. */
+async function refreshTitle($: Api) {
+  if (!me?.hostId) return
+  const tools = await $.tool.list()
+  if (!tools.some(t => t.name === GET_SESSION)) return
+  const input = { tool: GET_SESSION, session_id: 'self' } as never
+  const { decision } = await $.tool.check(input)
+  if (decision !== 'allow') return
+  const { text } = (await $.tool.call(input)) as { text?: string }
+  const title = text ? (JSON.parse(text) as { title?: unknown }).title : undefined
+  if (typeof title === 'string' && title.trim()) me.title = title.trim().slice(0, 120)
+}
+
+/** Opens a session of the desktop app by its own link, through the OS: the band may be drawn where links can't. */
+async function openSession($: Api, hostId: string) {
+  // `start` goes through cmd on Windows: only an id the app could have written reaches it.
+  if (!isHostId(hostId)) return
+  const url = sessionLink(hostId)
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT'
+  const tries = isWindows ? [['cmd', '/c', 'start', '', url]] : [['open', url], ['xdg-open', url]]
+  for (const argv of tries) {
+    const r = await $.process.run(argv, { timeoutMs: 5000 }).catch(() => null)
+    if (r?.exitCode === 0) return
+  }
+  $.ui.toast(w.openFailed)
+}
+
 async function refresh($: Api) {
   if (!me) return
+  if (ticks++ % TITLE_EVERY === 0) await refreshTitle($).catch(() => {})
   me.branch = (await git($, me.cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])) || me.branch
   await save($)
   const now = await $.clock.now()
@@ -143,6 +178,7 @@ export const register: Register = on => {
       repoName: repoKey.split('/').filter(Boolean).at(-1)?.replace(/\.git$/, '') ?? toplevel,
       branch: await git($, cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
       task: '',
+      hostId: (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) || undefined,
       files: {},
       startedAt: now,
       lastSeen: now,
@@ -151,6 +187,7 @@ export const register: Register = on => {
     try {
       const saved = JSON.parse(await $.fs.read(`${dir}/${me.sessionId}.json`)) as Presence
       me.task = saved.task
+      me.title = saved.title
       me.files = saved.files
       me.startedAt = saved.startedAt
     } catch {
@@ -180,6 +217,15 @@ export const register: Register = on => {
     // The task is what a person asked: typed, sent from a phone or an SDK host; never a peer's or a plugin's text.
     if (me && !me.task && HUMAN_ORIGINS.has(e.origin.kind)) {
       me.task = e.text.replace(/\s+/g, ' ').trim().slice(0, 140)
+      save($).catch(() => {})
+    }
+    return next(e)
+  })
+
+  // Outside the desktop app the title comes with the prompt (a /rename in the terminal, say).
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    if (me && e.session_title && e.session_title !== me.title) {
+      me.title = e.session_title.slice(0, 120)
       save($).catch(() => {})
     }
     return next(e)
@@ -244,11 +290,22 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" marginTop={1}>
         {list.slice(0, 3).map(a => (
-          <Text color={LEVEL_COLOR[a.level]}>
-            {LEVEL_MARK[a.level]} {a.level === 3 ? w.clash : w.otherAgent} {w.in} {repo} · {reasonOf(w, a)}
-            {a.overlap.length ? ` (${a.overlap.slice(0, 3).join(', ')}${a.overlap.length > 3 ? '…' : ''})` : ''}
-            <Text dimColor> · {a.task ? `«${a.task.slice(0, 60)}»` : w.noTask} · {a.branch}</Text>
-          </Text>
+          <Box flexDirection="row" gap={1}>
+            <Text color={LEVEL_COLOR[a.level]}>
+              {LEVEL_MARK[a.level]} {a.level === 3 ? w.clash : w.otherAgent} {w.in} {repo} · {reasonOf(w, a)}
+              {a.overlap.length ? ` (${a.overlap.slice(0, 3).join(', ')}${a.overlap.length > 3 ? '…' : ''})` : ''} ·
+            </Text>
+            {a.hostId ? (
+              <Button key={`open-${a.sessionId}`} plain onPress={() => openSession($, a.hostId)}>
+                <Text color={LEVEL_COLOR[a.level]} underline>
+                  {nameOf(w, { title: a.title, task: a.task.slice(0, 60) })}
+                </Text>
+              </Button>
+            ) : (
+              <Text color={LEVEL_COLOR[a.level]}>{nameOf(w, { title: a.title, task: a.task.slice(0, 60) })}</Text>
+            )}
+            <Text dimColor>· {a.branch}</Text>
+          </Box>
         ))}
         {list.length > 3 && <Text dimColor>  {w.more(list.length - 3)}</Text>}
         <Box flexDirection="row" gap={1}>

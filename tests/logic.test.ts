@@ -1,7 +1,18 @@
 import { expect, test } from 'claude-code/testing'
 
 import { pickLang, words } from '../hooks/i18n'
-import { type Presence, assess, assessAll, leadPrompt, normalizeRemote, peerMessage, repoRelative } from '../hooks/logic'
+import {
+  type Presence,
+  assess,
+  assessAll,
+  isHostId,
+  leadPrompt,
+  nameOf,
+  normalizeRemote,
+  peerMessage,
+  repoRelative,
+  sessionLink,
+} from '../hooks/logic'
 
 const EN = words('en')
 const ES = words('es')
@@ -112,4 +123,26 @@ test('files are matched relative to the repo, Windows paths included', () => {
   expect(repoRelative('/home/user/app', '/home/user/app/src/a.ts')).toBe('src/a.ts')
   expect(repoRelative('/home/user/app', '/home/user/app-other/a.ts')).toBe(null)
   expect(repoRelative('C:/code/app', 'C:\\code\\app\\src\\a.ts')).toBe('src/a.ts')
+})
+
+test('a peer is named by its sidebar title, else by what it was asked', () => {
+  const me = session({})
+  const titled = assess(me, session({ sessionId: 'b', title: 'Billing refactor', hostId: 'local_b' }), NOW)!
+  expect(titled.title).toBe('Billing refactor')
+  expect(titled.hostId).toBe('local_b')
+  expect(nameOf(EN, titled)).toBe('«Billing refactor»')
+  const untitled = assess(me, session({ sessionId: 'c', task: 'add SSO' }), NOW)!
+  expect(untitled.hostId).toBe('')
+  expect(nameOf(EN, untitled)).toBe('«add SSO»')
+  expect(nameOf(ES, { task: '' })).toBe('(sin tarea declarada)')
+  expect(leadPrompt(EN, me, [titled], ['b'])).toContain('«Billing refactor»')
+  expect(peerMessage(EN, session({ title: 'Auth work' }), titled, NOW)).toContain('«Auth work»')
+})
+
+test('a desktop session opens by the app link, and only a well-formed id is ever opened', () => {
+  expect(sessionLink('local_abc')).toBe('claude://claude.ai/epitaxy/local_abc')
+  expect(isHostId('local_22fd1b9f-193e-4f32-a0d8-f90dada2e4b2')).toBe(true)
+  expect(isHostId('x & calc')).toBe(false)
+  expect(isHostId('a"b')).toBe(false)
+  expect(assess(session({}), session({ sessionId: 'b', hostId: 'bad id&' }), NOW)!.hostId).toBe('')
 })
