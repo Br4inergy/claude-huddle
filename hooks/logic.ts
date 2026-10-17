@@ -234,6 +234,15 @@ export function isSeenSession(before: boolean, surfaces: readonly unknown[], too
   return before || surfaces.length > 0 || toolNames.some(n => n.startsWith(DESKTOP_TOOL_PREFIX))
 }
 
+/**
+ * Whether this session writes its presence file for the others to read. One someone sees always does. A run no one sees
+ * (a `claude -p` helper that a status line, a mod or a script starts) only once it has edited something in a repo: until
+ * then it is no risk to anyone, and showing it would put a nameless peer in every band of that repo.
+ */
+export function shouldPublish(seen: boolean, me: Pick<Presence, 'repos'>): boolean {
+  return seen || Object.values(me.repos).some(r => Object.keys(r.files).length > 0)
+}
+
 /** The desktop app's own link to a session, as its get_session answers it. */
 export const sessionLink = (hostId: string) => `claude://claude.ai/epitaxy/${hostId}`
 

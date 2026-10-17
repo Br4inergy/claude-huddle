@@ -39,6 +39,7 @@ import {
   resolvePath,
   sameJson,
   sessionLink,
+  shouldPublish,
   sisterNotice,
   shouldRefreshTitle,
   slashes,
@@ -69,6 +70,7 @@ const STAT_CAP = 300
 const NEGATIVE_MS = 60_000
 const PENDING_MAX = 5
 const LIST_TIMEOUT_MS = 5000
+const TOOL_LOOKS_MAX = 12
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/
 
 // The module's own variables: a reload starts them over and session.start fills them again.
@@ -86,7 +88,10 @@ let ticks = 0
 // The desktop app's id from the environment. A `claude -p` started from a desktop session inherits it, so it is
 // taken as this session's own only once someone sees the session (isSeenSession): a headless run never is.
 let envHostId = ''
+// Whether someone sees this session (isSeenSession). Until then it takes no desktop id and, until it edits something,
+// writes no presence (shouldPublish).
 let seen = false
+let toolLooks = 0
 // A turn is running between prompt.submit and turn.complete: huddle messages are also copied into its next tool result.
 let busy = false
 let pending: string[] = []
@@ -132,7 +137,7 @@ async function gitC($: Api, where: string, args: string[]) {
 }
 
 async function save($: Api) {
-  if (!me) return
+  if (!me || !shouldPublish(seen, me)) return
   const now = await $.clock.now()
   me.lastSeen = now
   me.repos[me.home]!.seenAt = now
@@ -447,7 +452,6 @@ async function onPrompt($: Api, e: { text: string; origin: { kind: string } }) {
     me.task = task
     // The first thing the person types says which language they work in.
     inferred = inferLang(e.text.slice(0, 2000)) ?? inferred
-    envHostId = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) || ''
     const lang = await detectLang($)
     w = words(lang)
     me.lang = lang
@@ -482,14 +486,16 @@ async function afterTool(
 /** One look at the peers. `timer` marks the clock's own tick: only those count toward re-reading the title. */
 async function refresh($: Api, timer = false) {
   if (!me) return
-  if (!me.hostId && isHostId(envHostId)) {
-    if (!seen) {
-      const surfaces = await $.session.surfaces().catch(() => [])
-      const tools = surfaces.length > 0 ? [] : ((await withTimeout($, $.tool.list(), LIST_TIMEOUT_MS)) ?? []).map(t => t.name)
-      seen = isSeenSession(seen, surfaces, tools)
-    }
-    if (seen) me.hostId = envHostId
+  if (!seen) {
+    const surfaces = await $.session.surfaces().catch(() => [])
+    // The desktop's tools are there from the start (or within its first minutes): a run without them by then is headless,
+    // and only a surface can still make it seen. That spares a long SDK run a tool list every tick.
+    const look = surfaces.length === 0 && toolLooks < TOOL_LOOKS_MAX
+    if (look) toolLooks++
+    const tools = look ? ((await withTimeout($, $.tool.list(), LIST_TIMEOUT_MS)) ?? []).map(t => t.name) : []
+    seen = isSeenSession(seen, surfaces, tools)
   }
+  if (!me.hostId && seen && isHostId(envHostId)) me.hostId = envHostId
   if (timer && shouldRefreshTitle(ticks++)) await refreshTitle($).catch(() => {})
   const now = await $.clock.now()
   await Promise.all(
@@ -771,7 +777,8 @@ export const register: Register = on => {
     return afterTool($, e as never, ran, watched).catch(() => ran)
   })
 
-  on('tool.call', { tool: 'mcp__huddle__peers' }, async $ => {
+  // The engine's tool names don't list a mod's own tools: the exact name is cast, so matching stays a plain string match.
+  on('tool.call', { tool: 'mcp__huddle__peers' as never }, async $ => {
     try {
       const list = await read($, alerts)
       return { result: list.length ? JSON.stringify(list, null, 2) : w.peersNone }
@@ -780,7 +787,7 @@ export const register: Register = on => {
     }
   })
 
-  on('tool.call', { tool: 'mcp__huddle__send' }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__huddle__send' as never }, async ($, e) => {
     const { sessionId, text } = e as unknown as { sessionId: string; text: string }
     try {
       const r = await $.session.send({ to: { sessionId }, text })
@@ -791,7 +798,7 @@ export const register: Register = on => {
     }
   })
 
-  on('tool.call', { tool: 'mcp__huddle__agree' }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__huddle__agree' as never }, async ($, e) => {
     try {
       return await agree($, e as unknown as AgreeInput)
     } catch (err) {

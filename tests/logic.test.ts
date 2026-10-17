@@ -30,6 +30,7 @@ import {
   reasonOf,
   repoRelative,
   sessionLink,
+  shouldPublish,
   shouldRefreshTitle,
   sisterNotice,
   stripMarkers,
@@ -638,4 +639,13 @@ test('a desktop session not open in the window is still seen; a claude -p helper
   expect(isSeenSession(true, [], [])).toBe(true)
   // Only the prefix counts, not a lookalike.
   expect(isSeenSession(false, [], ['mcp__ccdx_tool', 'ccd_session'])).toBe(false)
+})
+
+test('a run no one sees writes no presence until it edits something', () => {
+  const clean = { repos: { r: { repoKey: 'r', repoName: 'r', toplevel: '/r', branch: 'main', files: {} } } }
+  const edited = { repos: { r: { ...clean.repos.r, files: { 'src/a.ts': NOW } } } }
+  expect(shouldPublish(true, clean)).toBe(true)
+  expect(shouldPublish(false, clean)).toBe(false)
+  expect(shouldPublish(false, edited)).toBe(true)
+  expect(shouldPublish(false, { repos: {} })).toBe(false)
 })
