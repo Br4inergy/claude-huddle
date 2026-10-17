@@ -1,4 +1,4 @@
-import type { Alert, AlertKind, BandState, Level, OwnerConflict, Who } from '../types'
+import type { Alert, AlertKind, BandState, Family, Level, OwnerConflict, Who } from '../types'
 import type { Lang, Words } from './i18n'
 
 /** What a session knows of one repo it works in: its working copy there, its branch, the files it edited. */
@@ -41,6 +41,8 @@ export type Presence = {
   task: string
   title?: string
   hostId?: string
+  /** The desktop id of the session that started this one (start_session), while it is not detached. */
+  parentHostId?: string
   lang?: Lang
   huddle?: HuddleInfo
   startedAt: number
@@ -131,6 +133,9 @@ function assessRepo(mine: RepoEntry, theirs: RepoEntry, now: number): Pick<Alert
  */
 export function assess(me: Presence, peer: Presence, now: number): Alert | null {
   if (peer.sessionId === me.sessionId || !isLive(peer, now)) return null
+  // A session and the one that started it (or one it started) already coordinate through the app.
+  const family = familyOf(me, peer)
+  if (family === 'mother' || family === 'daughter') return null
 
   const theirs = new Map(activeRepos(peer, now).map(r => [r.repoKey, r]))
   let best: { repo: RepoEntry; found: Pick<Alert, 'level' | 'kind' | 'overlap'> } | null = null
@@ -148,6 +153,8 @@ export function assess(me: Presence, peer: Presence, now: number): Alert | null 
   if (!best) return null
   // A session nobody has touched for hours only speaks up when the files already clash.
   if (isIdle(peer, now) && best.found.level < 3) return null
+  // Sisters only speak up when their files clash.
+  if (family === 'sister' && best.found.level < 3) return null
 
   const peerRepo = theirs.get(best.repo.repoKey)!
   return {
@@ -159,8 +166,28 @@ export function assess(me: Presence, peer: Presence, now: number): Alert | null 
     hostId: isHostId(peer.hostId) ? peer.hostId : '',
     task: peer.task,
     branch: peerRepo.branch,
+    ...(family === 'sister' ? { family } : {}),
   }
 }
+
+/** The session that started the one whose get_session answer this is; none once the person detached it. */
+export function parentFromSession(answer: unknown): string | undefined {
+  const a = answer as { parentSessionId?: unknown; detached?: unknown } | null
+  if (!a || typeof a !== 'object' || a.detached === true) return undefined
+  return isHostId(a.parentSessionId) ? a.parentSessionId : undefined
+}
+
+/** What `peer` is to `me` among sessions started from one another, by the desktop ids; null when unrelated or unknown. */
+export function familyOf(me: Presence, peer: Presence): 'mother' | 'daughter' | 'sister' | null {
+  if (me.parentHostId && me.parentHostId === peer.hostId) return 'mother'
+  if (peer.parentHostId && peer.parentHostId === me.hostId) return 'daughter'
+  if (me.parentHostId && me.parentHostId === peer.parentHostId) return 'sister'
+  return null
+}
+
+/** The live session that started this one. */
+export const motherOf = (me: Presence, peers: Presence[], now: number): Presence | undefined =>
+  peers.find(p => p.sessionId !== me.sessionId && isLive(p, now) && familyOf(me, p) === 'mother')
 
 export function assessAll(me: Presence, peers: Presence[], now: number): Alert[] {
   return peers
@@ -179,7 +206,8 @@ export function repoRelative(toplevel: string, path: string): string | null {
   return file.startsWith(root) ? file.slice(root.length) : null
 }
 
-export const reasonOf = (w: Words, a: Alert) => w.reason(a.kind, a.overlap.length)
+export const reasonOf = (w: Words, a: Alert) =>
+  w.reason(a.kind, a.overlap.length) + (a.family === 'sister' ? w.sisterSuffix : '')
 
 const list = (w: Words, xs: string[], max = 8) =>
   xs.length === 0 ? w.none : xs.slice(0, max).join(', ') + (xs.length > max ? ` (+${xs.length - max})` : '')
@@ -220,6 +248,16 @@ export function peerMessage(
     leader: huddle?.leaderId ?? me.sessionId,
     marker: huddle ? huddleMarker(huddle.id, huddle.leaderId) : '',
   })
+}
+
+/** The one short notice a mother gets when two of her daughters edit the same files. */
+export function sisterNotice(w: Words, me: Presence, sisters: Alert[]): string {
+  const files = [...new Set(sisters.flatMap(a => a.overlap))].sort()
+  return w.sisterClashToMother(
+    nameOf(w, me),
+    sisters.map(a => nameOf(w, a)).join(', '),
+    files.length ? list(w, files) : w.none,
+  )
 }
 
 // What the initiating session's own model is asked to do.
@@ -519,13 +557,21 @@ export function ownerConflicts(lead: HuddleLead | undefined, members: Presence[]
  */
 export function bandState(me: Presence, peers: Presence[], now: number): BandState {
   const alerts = assessAll(me, peers, now)
-  if (alerts.length === 0) return { kind: 'none' }
+  const family = familyLine(me, peers, now)
+  if (alerts.length === 0) return family ? { kind: 'family', family } : { kind: 'none' }
   const members = huddleMembers(me, peers, now)
   const outsiders = alerts.filter(a => !members?.has(a.sessionId))
-  if (outsiders.length > 0) return { kind: 'alert', alerts: outsiders, hasHuddle: members !== null }
+  if (outsiders.length > 0) return { kind: 'alert', alerts: outsiders, hasHuddle: members !== null, ...(family ? { family } : {}) }
 
   const inAlert = new Set(alerts.map(a => a.sessionId))
-  const others = peers.filter(p => members!.has(p.sessionId) && isLive(p, now) && (!isIdle(p, now) || inAlert.has(p.sessionId)))
+  // A mother or a daughter takes no part in the huddle, even if a marker reached it.
+  const others = peers.filter(
+    p =>
+      members!.has(p.sessionId) &&
+      isLive(p, now) &&
+      (!isIdle(p, now) || inAlert.has(p.sessionId)) &&
+      !['mother', 'daughter'].includes(familyOf(me, p) ?? ''),
+  )
   const h = me.huddle!
   const leader = leaderOf(me, peers)
   const confirmed =
@@ -537,7 +583,15 @@ export function bandState(me: Presence, peers: Presence[], now: number): BandSta
     leader: leader ? who(leader) : { title: '', task: '', hostId: '' },
     leaderIsMe: h.leaderId === me.sessionId,
     conflicts: ownerConflicts(leader?.huddle?.lead, [me, ...others], now),
+    ...(family ? { family } : {}),
   }
+}
+
+/** The live sessions of my family, for the dim line of the band; undefined when there are none. */
+export function familyLine(me: Presence, peers: Presence[], now: number): Family | undefined {
+  const mother = motherOf(me, peers, now)
+  const daughters = peers.filter(p => p.sessionId !== me.sessionId && isLive(p, now) && familyOf(me, p) === 'daughter').length
+  return mother || daughters ? { ...(mother ? { mother: who(mother) } : {}), daughters } : undefined
 }
 
 /** A repo's short name: the last part of its remote, or, with no remote (the key is its git directory), its folder. */

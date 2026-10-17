@@ -58,6 +58,10 @@ Judged per repo, over every repo two sessions share. A session works in its home
 
 So a session that starts in one repo and goes on to edit `~/code/api` clashes with the session that lives there. The same repo is recognized across clones and worktrees by its `origin` remote (or, with no remote, its git directory).
 
+### Sessions of one family
+
+In the Claude desktop app a session can start another one. Those two already coordinate through the app, so Huddle keeps out of it: a session and the one that started it (its mother) never alert each other and never get the protocol. Two sessions started by the same mother (sisters) alert only on level 3, and that alert also reaches the mother with one short note, so she can settle who owns the files. A dim line closes the band: `◦ started by «Mother» · 2 daughters`. The link comes from the app (`get_session`), so this works in the desktop app only; a session you move to top level is no longer a daughter. Sessions outside the family are unchanged.
+
 **Idle sessions don't alert.** A session nobody has typed to and whose agent has made no tool call in the last 2 hours is left out of the band and out of the huddle's count, unless its files clash with yours.
 
 **Shell edits count.** Around every `Bash` command Huddle compares `git status` (plus the size and modification time of up to 300 dirty files) in your home repo, the repos you entered recently and the directories the command names, at most 3 repos, and attributes what changed to this session. Entering a repo (`cd ~/code/api && git push`) is enough to show up in it. Files that merely leave the status (a commit, a revert) are not edits.

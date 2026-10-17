@@ -103,6 +103,12 @@ const EN = {
     (p.failed ? ' · ⚠ the message could not be delivered' : ''),
   leadClose:
     'You lead. The protocol already went out: do not message them until they reply. When the replies are in, call the huddle agree tool once with one owner per disputed file and a 3-line summary; it reaches everyone. Then keep doing your task and give the user the summary. Keep to your original instruction: commit or publish only if that was already part of your task, and then in the agreed order.',
+  familyBy: 'started by',
+  familyMother: (name: string) => `started by ${name}`,
+  familyDaughters: (n: number) => `${n} daughter${n === 1 ? '' : 's'}`,
+  sisterSuffix: ' · sister session',
+  sisterClashToMother: (me: string, sister: string, files: string) =>
+    `[huddle] Two of the sessions you started, ${me} and ${sister}, are editing the same files (${files}). You split the work between them, so settle which of them owns those files and tell them.`,
   leadAdded: (names: string) =>
     `[huddle] I added these sessions to the huddle: ${names}. The protocol already went out: do not message them until they reply. When their replies are in, call the huddle agree tool again with the updated owners and summary.`,
 }
@@ -202,6 +208,12 @@ const ES: Words = {
     (p.failed ? ' · ⚠ no se le pudo entregar el mensaje' : ''),
   leadClose:
     'Lidera tú. El protocolo ya salió: no les escribas hasta que contesten. Cuando lleguen las respuestas, llama una sola vez a la herramienta agree de huddle con un dueño por archivo en disputa y un resumen de 3 líneas; le llega a todos. Luego sigue con tu tarea y dale el resumen al usuario. Respeta tu instrucción original: commitea o publica solo si eso ya era parte de tu tarea, y entonces en el orden acordado.',
+  familyBy: 'la inició',
+  familyMother: name => `la inició ${name}`,
+  familyDaughters: n => `${n} hija${n === 1 ? '' : 's'}`,
+  sisterSuffix: ' · sesión hermana',
+  sisterClashToMother: (me, sister, files) =>
+    `[huddle] Dos de las sesiones que iniciaste, ${me} y ${sister}, están editando los mismos archivos (${files}). Tú repartiste el trabajo entre ellas, así que define cuál es dueña de esos archivos y avísales.`,
   leadAdded: names =>
     `[huddle] Añadí estas sesiones al huddle: ${names}. El protocolo ya salió: no les escribas hasta que contesten. Cuando lleguen sus respuestas, llama otra vez a la herramienta agree de huddle con los dueños y el resumen actualizados.`,
 }

@@ -17,6 +17,8 @@ export type Alert = {
   task: string
   branch: string
   overlap: string[]
+  /** Set when the peer was started by the same session that started this one (a sister): it alerts only on level 3. */
+  family?: 'sister'
 }
 
 /** How a session is named to the person, and how the band opens it. */
@@ -25,11 +27,23 @@ export type Who = { title: string; task: string; hostId: string }
 /** A member of the huddle edited a file the agreement gave to another member. */
 export type OwnerConflict = { editor: Who; owner: Who; repoName: string; file: string }
 
-/** What the band shows: nothing, the peers that are not in the huddle, or a calm line when everyone is. */
+/** The live sessions of this one's family in the desktop app: the one that started it and the ones it started. */
+export type Family = { mother?: Who; daughters: number }
+
+/** What the band shows: nothing, the peers that are not in the huddle, a calm line when everyone is, or only the family. */
 export type BandState =
   | { kind: 'none' }
-  | { kind: 'alert'; alerts: Alert[]; hasHuddle: boolean }
-  | { kind: 'huddle'; size: number; confirmed: number; leader: Who; leaderIsMe: boolean; conflicts: OwnerConflict[] }
+  | { kind: 'family'; family: Family }
+  | { kind: 'alert'; alerts: Alert[]; hasHuddle: boolean; family?: Family }
+  | {
+      kind: 'huddle'
+      size: number
+      confirmed: number
+      leader: Who
+      leaderIsMe: boolean
+      conflicts: OwnerConflict[]
+      family?: Family
+    }
 
 export type CoordResult = { at: number; sent: number; failed: string[] }
 

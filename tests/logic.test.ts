@@ -12,20 +12,25 @@ import {
   bandState,
   diffSnapshots,
   dirsInCommand,
+  familyOf,
   huddleMarker,
   isHostId,
   leadPrompt,
+  motherOf,
   nameOf,
   normalizeRemote,
   ownerKey,
   ownerOf,
+  parentFromSession,
   parseAddMarker,
   parseHuddleMarker,
   parsePorcelain,
   peerMessage,
+  reasonOf,
   repoRelative,
   sessionLink,
   shouldRefreshTitle,
+  sisterNotice,
   stripMarkers,
   taskFromPrompt,
   upgradePresence,
@@ -500,4 +505,122 @@ test('a busy agent gets the clash and how to answer, not the whole protocol', ()
   expect(short).not.toContain('2. ')
   expect(short).not.toContain('[huddle:h1')
   expect(compactForMidTurn('x'.repeat(5000)).length).toBe(1500)
+})
+
+// ---- Sessions of one family (the desktop app's start_session) ----
+
+const kin = (id: string, host: string, parent?: string, flat: Flat = {}): Presence =>
+  session({ sessionId: id, hostId: host, parentHostId: parent, toplevel: `/r/wt-${id}`, ...flat })
+
+test('familyOf: mother, daughter, sister, unrelated, unknown', () => {
+  const mom = kin('m', 'local_m')
+  const kid = kin('k1', 'local_k1', 'local_m')
+  const sis = kin('k2', 'local_k2', 'local_m')
+  expect(familyOf(kid, mom)).toBe('mother')
+  expect(familyOf(mom, kid)).toBe('daughter')
+  expect(familyOf(kid, sis)).toBe('sister')
+  expect(familyOf(mom, kin('x', 'local_x'))).toBe(null)
+  expect(familyOf(kid, kin('y', 'local_y', 'local_other'))).toBe(null)
+  // no ids known: no family
+  expect(familyOf(session({ sessionId: 'a' }), session({ sessionId: 'b' }))).toBe(null)
+  expect(familyOf(kin('a', 'local_a'), kin('b', 'local_b'))).toBe(null)
+  expect(familyOf(session({ sessionId: 'a', parentHostId: 'local_m' }), session({ sessionId: 'b' }))).toBe(null)
+})
+
+test('mother and daughter never alert, at any level', () => {
+  const mom = kin('m', 'local_m', undefined, { files: { 'src/a.ts': NOW - 1_000 } })
+  const kid = kin('k1', 'local_k1', 'local_m', { files: { 'src/a.ts': NOW - 1_000 } })
+  expect(assess(kid, mom, NOW)).toBe(null) // level 3 files
+  expect(assess(mom, kid, NOW)).toBe(null)
+  const sameCopy = kin('k1', 'local_k1', 'local_m', { toplevel: '/r/app' })
+  expect(assess(session({ sessionId: 'm', hostId: 'local_m' }), sameCopy, NOW)).toBe(null) // level 2
+  const otherCopy = kin('k1', 'local_k1', 'local_m')
+  expect(assess(session({ sessionId: 'm', hostId: 'local_m' }), otherCopy, NOW)).toBe(null) // level 1
+  expect(assessAll(kid, [mom], NOW)).toEqual([])
+})
+
+test('sisters alert only at level 3, with family set', () => {
+  const me = kin('k1', 'local_k1', 'local_m')
+  expect(assess(me, kin('k2', 'local_k2', 'local_m', { toplevel: '/r/app' }), NOW)).toBe(null) // level 2
+  expect(assess(me, kin('k2', 'local_k2', 'local_m'), NOW)).toBe(null) // level 1
+  const clashing = kin('k2', 'local_k2', 'local_m', { files: { 'src/a.ts': NOW - 1_000 } })
+  const a = assess(kin('k1', 'local_k1', 'local_m', { files: { 'src/a.ts': NOW - 1_000 } }), clashing, NOW)
+  expect(a?.level).toBe(3)
+  expect(a?.family).toBe('sister')
+  expect(reasonOf(EN, a!)).toContain('sister session')
+  expect(reasonOf(ES, a!)).toContain('sesión hermana')
+  // outside the family nothing changes
+  const stranger = assess(session({ files: { 'src/a.ts': NOW - 1_000 } }), session({ sessionId: 'b', files: { 'src/a.ts': NOW - 1_000 } }), NOW)
+  expect(stranger?.family).toBe(undefined)
+})
+
+test('the band: family line, the family kind, and family kept out of the huddle', () => {
+  const kid = kin('k1', 'local_k1', 'local_m', { title: 'Kid' })
+  const mom = kin('m', 'local_m', undefined, { title: 'Mom' })
+  const sis = kin('k2', 'local_k2', 'local_m')
+  // only family around: the new kind, with the mother named and no daughters
+  expect(bandState(kid, [mom], NOW)).toEqual({ kind: 'family', family: { mother: { title: 'Mom', task: 'fix the login', hostId: 'local_m' }, daughters: 0 } })
+  // the mother sees her two daughters
+  const two = bandState(mom, [kid, sis], NOW)
+  expect(two).toEqual({ kind: 'family', family: { daughters: 2 } })
+  // an ended or stale family member is not shown
+  expect(bandState(mom, [{ ...kid, ended: true }], NOW)).toEqual({ kind: 'none' })
+  // family next to an outsider: the alert is for the outsider alone, with the family line
+  const outsider = session({ sessionId: 'z', toplevel: '/r/wt-z' })
+  const mixed = bandState(kid, [mom, outsider], NOW)
+  expect(mixed.kind).toBe('alert')
+  if (mixed.kind === 'alert') {
+    expect(mixed.alerts.map(a => a.sessionId)).toEqual(['z'])
+    expect(mixed.family?.mother?.title).toBe('Mom')
+  }
+  // a mother whose marker reached her is not a member of the calm line
+  const lead = inHuddle(kin('k1', 'local_k1', 'local_m'), { leaderId: 'k1', lead: { members: ['k2', 'm'], owners: {}, createdAt: NOW - 9_000 } })
+  const calm = bandState(lead, [inHuddle(sis, { leaderId: 'k1' }), inHuddle(mom, { leaderId: 'k1' })], NOW)
+  expect(calm.kind === 'family').toBe(true) // sis is level 1: no alerts, so only the family
+  const sisClash = kin('k2', 'local_k2', 'local_m', { files: { 'src/a.ts': NOW - 1_000 } })
+  const leadClash = inHuddle(kin('k1', 'local_k1', 'local_m', { files: { 'src/a.ts': NOW - 1_000 } }), { leaderId: 'k1', lead: { members: ['k2', 'm'], owners: {}, createdAt: NOW - 9_000 } })
+  const huddle = bandState(leadClash, [inHuddle(sisClash, { leaderId: 'k1' }), inHuddle(mom, { leaderId: 'k1' })], NOW)
+  expect(huddle.kind).toBe('huddle')
+  if (huddle.kind === 'huddle') {
+    expect(huddle.size).toBe(2) // me and my sister, not the mother
+    expect(huddle.family?.mother?.title).toBe('Mom')
+  }
+})
+
+test('parentFromSession reads get_session; a detached parent is ignored', () => {
+  expect(parentFromSession({ title: 'x', parentSessionId: 'local_m' })).toBe('local_m')
+  expect(parentFromSession({ parentSessionId: 'local_m', detached: true })).toBe(undefined)
+  expect(parentFromSession({ parentSessionId: 'local_m', detached: false })).toBe('local_m')
+  expect(parentFromSession({ title: 'x' })).toBe(undefined)
+  expect(parentFromSession({ parentSessionId: '../etc; rm' })).toBe(undefined)
+  expect(parentFromSession({ parentSessionId: 42 })).toBe(undefined)
+  expect(parentFromSession(null)).toBe(undefined)
+})
+
+test('the mother is found live, and told once what her daughters clash on', () => {
+  const mom = kin('m', 'local_m')
+  const me = kin('k1', 'local_k1', 'local_m', { title: 'One' })
+  expect(motherOf(me, [mom], NOW)?.sessionId).toBe('m')
+  expect(motherOf(me, [{ ...mom, lastSeen: NOW - 5 * 60_000 }], NOW)).toBe(undefined)
+  const clash = assess(
+    kin('k1', 'local_k1', 'local_m', { title: 'One', files: { 'src/a.ts': NOW - 1_000, 'src/b.ts': NOW - 1_000 } }),
+    kin('k2', 'local_k2', 'local_m', { title: 'Two', files: { 'src/a.ts': NOW - 1_000, 'src/b.ts': NOW - 1_000 } }),
+    NOW,
+  )!
+  const text = sisterNotice(EN, me, [clash])
+  expect(text).toContain('«One»')
+  expect(text).toContain('«Two»')
+  expect(text).toContain('src/a.ts, src/b.ts')
+})
+
+test('family texts exist in English and Spanish', () => {
+  expect(EN.familyMother('«Boss»')).toBe('started by «Boss»')
+  expect(ES.familyMother('«Jefa»')).toBe('la inició «Jefa»')
+  expect(EN.familyDaughters(2)).toBe('2 daughters')
+  expect(EN.familyDaughters(1)).toBe('1 daughter')
+  expect(ES.familyDaughters(2)).toBe('2 hijas')
+  expect(ES.familyDaughters(1)).toBe('1 hija')
+  expect(EN.sisterClashToMother('«A»', '«B»', 'x.ts')).toContain('x.ts')
+  expect(ES.sisterClashToMother('«A»', '«B»', 'x.ts')).toContain('x.ts')
+  expect(EN.sisterSuffix).not.toBe(ES.sisterSuffix)
 })

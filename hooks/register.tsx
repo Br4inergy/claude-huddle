@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Api, Register, ToolCallResult } from 'claude-code'
 
-import type { Alert, BandState, CoordResult } from '../types'
+import type { Alert, BandState, CoordResult, Family } from '../types'
 import { type Lang, type Words, inferLang, pickLang, words } from './i18n'
 import {
   type Presence,
@@ -21,9 +21,11 @@ import {
   leadPrompt,
   leaderOf,
   liveHuddle,
+  motherOf,
   nameOf,
   newHuddleId,
   normalizeRemote,
+  parentFromSession,
   ownerKey,
   ownerOf,
   parseAddMarker,
@@ -36,6 +38,7 @@ import {
   resolvePath,
   sameJson,
   sessionLink,
+  sisterNotice,
   shouldRefreshTitle,
   slashes,
   stripMarkers,
@@ -154,8 +157,17 @@ async function refreshTitle($: Api) {
   const { decision } = await $.tool.check(input)
   if (decision !== 'allow') return
   const { text } = (await $.tool.call(input)) as { text?: string }
-  const title = text ? (JSON.parse(text) as { title?: unknown }).title : undefined
-  if (typeof title === 'string' && title.trim()) me.title = title.trim().slice(0, 120)
+  const answer = text ? (JSON.parse(text) as { title?: unknown }) : undefined
+  if (typeof answer?.title === 'string' && answer.title.trim()) me.title = answer.title.trim().slice(0, 120)
+  // The session that started this one, while the person has not moved it to top level.
+  if (answer) me.parentHostId = parentFromSession(answer)
+}
+
+/** Tells the mother, once, that two of her daughters edit the same files. Best effort; only when she is live. */
+async function tellMother($: Api, peers: Presence[], sisters: Alert[], now: number) {
+  const mother = me && motherOf(me, peers, now)
+  if (!me || !mother || sisters.length === 0) return
+  await $.session.send({ to: { sessionId: mother.sessionId }, text: sisterNotice(w, me, sisters) }).catch(() => null)
 }
 
 /** Opens a session of the desktop app by its own link, through the OS: the band may be drawn where links can't. */
@@ -475,6 +487,7 @@ async function refresh($: Api, timer = false) {
       if (a.level < 3 || toasted.has(key) || snoozed) continue
       toasted.add(key)
       $.ui.toast(w.toastClash(a.repoName, reasonOf(w, a)))
+      if (a.family === 'sister') void tellMother($, peers, [a], now)
     }
     $.ui.status(w.status(state.alerts.length + 1, state.alerts[0]!.repoName))
   } else {
@@ -518,6 +531,12 @@ async function coordinate($: Api): Promise<string> {
       .catch(err => ({ isDelivered: false as const, reason: String(err) }))
     if (r.isDelivered) sent.push(a.sessionId)
     else failed.push(`${a.sessionId.slice(0, 8)}: ${r.reason}`)
+  }
+  // Sisters clash on the same files: their mother hears of it once, and the alert loop doesn't repeat it.
+  const sisters = targets.filter(a => a.family === 'sister')
+  if (sisters.length) {
+    for (const a of sisters) toasted.add(`${a.sessionId}:${a.repoKey}:${a.level}`)
+    await tellMother($, peers, sisters, now)
   }
   const names = targets.filter(a => sent.includes(a.sessionId)).map(a => nameOf(w, a)).join(', ')
   if (sent.length) {
@@ -634,6 +653,7 @@ export const register: Register = on => {
       if (saved) {
         me.task = saved.task
         me.title = saved.title
+        me.parentHostId = saved.parentHostId
         me.huddle = saved.huddle
         me.startedAt = saved.startedAt
         me.lastActiveAt = saved.lastActiveAt
@@ -776,6 +796,32 @@ export const register: Register = on => {
     if (!me || e.props.hasSurvey || state.kind === 'none') return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // The dim family line closes every band: who started this session, how many it started.
+    const fam: Family | undefined = state.family
+    const mother = fam?.mother
+    const familyRow = fam && (
+      <Box flexDirection="row" gap={1}>
+        {mother?.hostId ? (
+          <Button key="open-mother" plain onPress={() => openSession($, mother.hostId)}>
+            <Text dimColor underline>
+              ◦ {w.familyBy} {nameOf(w, mother)}
+            </Text>
+          </Button>
+        ) : (
+          <Text dimColor>◦ {mother ? w.familyMother(nameOf(w, mother)) : ''}</Text>
+        )}
+        {fam.daughters > 0 && <Text dimColor>{mother ? '· ' : ''}{w.familyDaughters(fam.daughters)}</Text>}
+      </Box>
+    )
+
+    if (state.kind === 'family') {
+      return (
+        <Box flexDirection="column" marginTop={1}>
+          {familyRow}
+        </Box>
+      )
+    }
+
     if (state.kind === 'huddle') {
       const led = state.leader
       return (
@@ -801,6 +847,7 @@ export const register: Register = on => {
               ▲ {w.editedOwned(nameOf(w, c.editor), c.file, nameOf(w, c.owner))}
             </Text>
           ))}
+          {familyRow}
         </Box>
       )
     }
@@ -846,6 +893,7 @@ export const register: Register = on => {
             </Text>
           )}
         </Box>
+        {familyRow}
       </Box>
     )
   })
