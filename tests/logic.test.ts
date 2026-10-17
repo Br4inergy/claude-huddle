@@ -15,6 +15,7 @@ import {
   familyOf,
   huddleMarker,
   isHostId,
+  isSeenSession,
   leadPrompt,
   motherOf,
   nameOf,
@@ -623,4 +624,18 @@ test('family texts exist in English and Spanish', () => {
   expect(EN.sisterClashToMother('«A»', '«B»', 'x.ts')).toContain('x.ts')
   expect(ES.sisterClashToMother('«A»', '«B»', 'x.ts')).toContain('x.ts')
   expect(EN.sisterSuffix).not.toBe(ES.sisterSuffix)
+})
+
+test('a desktop session not open in the window is still seen; a claude -p helper is not', () => {
+  // On a surface: seen.
+  expect(isSeenSession(false, [{ kind: 'terminal' }], [])).toBe(true)
+  // Desktop-hosted with no surface for hours: its mcp__ccd_* tools say so.
+  expect(isSeenSession(false, [], ['Bash', 'mcp__ccd_session__start_session'])).toBe(true)
+  // A headless child: inherits the env, not the tools.
+  expect(isSeenSession(false, [], ['Bash', 'Read', 'mcp__huddle__peers'])).toBe(false)
+  expect(isSeenSession(false, [], [])).toBe(false)
+  // Sticky: a desktop that detaches does not take the id back.
+  expect(isSeenSession(true, [], [])).toBe(true)
+  // Only the prefix counts, not a lookalike.
+  expect(isSeenSession(false, [], ['mcp__ccdx_tool', 'ccd_session'])).toBe(false)
 })

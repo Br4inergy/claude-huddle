@@ -220,6 +220,20 @@ export const nameOf = (w: Words, p: { title?: string; task: string }) => (p.titl
 /** A desktop session id as the app spells it; anything else (from a peer's file) is never opened. */
 export const isHostId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(id)
 
+/** The prefix of the tools the Claude desktop app gives the sessions it hosts (`mcp__ccd_session__...`, `mcp__ccd_turn__...`). */
+export const DESKTOP_TOOL_PREFIX = 'mcp__ccd_'
+
+/**
+ * Whether this process is a session someone sees, and so may take the desktop app's id from CLAUDE_CODE_HOST_SESSION_ID
+ * as its own: it draws on a surface (terminal, phone, IDE, desktop) or the desktop app hosts it (its `mcp__ccd_*` tools
+ * are there even while the session is not open in the window, when `surfaces()` is empty for hours). A `claude -p` run
+ * started from a desktop session inherits the variable but neither of these, so it never passes for its parent. Once
+ * true it stays true. If a desktop release ever hands its `ccd` servers to child processes, this needs another signal.
+ */
+export function isSeenSession(before: boolean, surfaces: readonly unknown[], toolNames: readonly string[]): boolean {
+  return before || surfaces.length > 0 || toolNames.some(n => n.startsWith(DESKTOP_TOOL_PREFIX))
+}
+
 /** The desktop app's own link to a session, as its get_session answers it. */
 export const sessionLink = (hostId: string) => `claude://claude.ai/epitaxy/${hostId}`
 

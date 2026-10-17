@@ -18,6 +18,7 @@ import {
   huddleMembers,
   isHostId,
   isLive,
+  isSeenSession,
   leadPrompt,
   leaderOf,
   liveHuddle,
@@ -67,6 +68,7 @@ const SNAPSHOT_MS = 3000
 const STAT_CAP = 300
 const NEGATIVE_MS = 60_000
 const PENDING_MAX = 5
+const LIST_TIMEOUT_MS = 5000
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/
 
 // The module's own variables: a reload starts them over and session.start fills them again.
@@ -82,8 +84,9 @@ const toasted = new Set<string>()
 const warned = new Set<string>()
 let ticks = 0
 // The desktop app's id from the environment. A `claude -p` started from a desktop session inherits it, so it is
-// taken as this session's own only once the session is drawn somewhere (a headless run never is).
+// taken as this session's own only once someone sees the session (isSeenSession): a headless run never is.
 let envHostId = ''
+let seen = false
 // A turn is running between prompt.submit and turn.complete: huddle messages are also copied into its next tool result.
 let busy = false
 let pending: string[] = []
@@ -98,6 +101,23 @@ async function detectLang($: Api): Promise<Lang> {
   const settings = (await $.settings.read().catch(() => ({}))) as { language?: unknown }
   const locale = (await $.env.get('LC_ALL').catch(() => null)) || (await $.env.get('LANG').catch(() => null)) || null
   return pickLang(undefined, settings.language, locale, inferred)
+}
+
+/** `p`, or undefined when it fails or takes longer than `ms`. */
+function withTimeout<T>($: Api, p: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise(resolve => {
+    const t = $.clock.after(ms, () => resolve(undefined))
+    p.then(
+      v => {
+        t.cancel()
+        resolve(v)
+      },
+      () => {
+        t.cancel()
+        resolve(undefined)
+      },
+    )
+  })
 }
 
 async function git($: Api, cwd: string, args: string[]) {
@@ -462,7 +482,14 @@ async function afterTool(
 /** One look at the peers. `timer` marks the clock's own tick: only those count toward re-reading the title. */
 async function refresh($: Api, timer = false) {
   if (!me) return
-  if (!me.hostId && isHostId(envHostId) && (await $.session.surfaces().catch(() => [])).length > 0) me.hostId = envHostId
+  if (!me.hostId && isHostId(envHostId)) {
+    if (!seen) {
+      const surfaces = await $.session.surfaces().catch(() => [])
+      const tools = surfaces.length > 0 ? [] : ((await withTimeout($, $.tool.list(), LIST_TIMEOUT_MS)) ?? []).map(t => t.name)
+      seen = isSeenSession(seen, surfaces, tools)
+    }
+    if (seen) me.hostId = envHostId
+  }
   if (timer && shouldRefreshTitle(ticks++)) await refreshTitle($).catch(() => {})
   const now = await $.clock.now()
   await Promise.all(
@@ -663,6 +690,8 @@ export const register: Register = on => {
     } catch {
       // first start
     }
+    // Read here too: after a reload the task is already known and the first prompt never comes again.
+    envHostId = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID').catch(() => undefined)) || ''
     const lang = await detectLang($)
     w = words(lang)
     me.lang = lang

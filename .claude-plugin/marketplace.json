@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Huddle: see when your Claude Code sessions are about to collide in the same repo, and get them to coordinate with one button.",
-    "version": "0.3.1"
+    "version": "0.3.2"
   },
   "plugins": [
     {
       "name": "huddle",
       "description": "Huddle: when two or more Claude Code sessions work in the same repo, see it before they collide, and get them to split the work with one button.",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "author": {
         "name": "Br4inergy"
       },
