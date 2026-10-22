@@ -36,6 +36,7 @@ import {
   stripMarkers,
   taskFromPrompt,
   upgradePresence,
+  titleFromSessionAnswer,
 } from '../hooks/logic'
 
 const EN = words('en')
@@ -648,4 +649,13 @@ test('a run no one sees writes no presence until it edits something', () => {
   expect(shouldPublish(false, clean)).toBe(false)
   expect(shouldPublish(false, edited)).toBe(true)
   expect(shouldPublish(false, { repos: {} })).toBe(false)
+})
+
+test('titleFromSessionAnswer reads the desktop and the claude.ai answers', () => {
+  expect(titleFromSessionAnswer({ title: '  Arreglar\nlogin ' })).toBe('Arreglar login')
+  expect(titleFromSessionAnswer({ ccr: { title: 'Nombres de sesiones' } })).toBe('Nombres de sesiones')
+  expect(titleFromSessionAnswer({ ccr: { title: 'x'.repeat(300) } }).length).toBe(120)
+  expect(titleFromSessionAnswer({ ccr: {} })).toBe('')
+  expect(titleFromSessionAnswer(undefined)).toBe('')
+  expect(titleFromSessionAnswer('text')).toBe('')
 })

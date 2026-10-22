@@ -170,6 +170,17 @@ export function assess(me: Presence, peer: Presence, now: number): Alert | null 
   }
 }
 
+/**
+ * The session's own title out of a `get_session` answer: the desktop app's (`{ title }`) or claude.ai's for a Remote
+ * Control session (`{ ccr: { title } }`), at most 120 characters. '' when there is none.
+ */
+export function titleFromSessionAnswer(answer: unknown): string {
+  const a = (answer ?? {}) as { title?: unknown; ccr?: { title?: unknown } }
+  if (typeof a !== 'object') return ''
+  const title = typeof a.title === 'string' ? a.title : typeof a.ccr?.title === 'string' ? a.ccr.title : ''
+  return title.replace(/\s+/g, ' ').trim().slice(0, 120)
+}
+
 /** The session that started the one whose get_session answer this is; none once the person detached it. */
 export function parentFromSession(answer: unknown): string | undefined {
   const a = answer as { parentSessionId?: unknown; detached?: unknown } | null

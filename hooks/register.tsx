@@ -45,6 +45,7 @@ import {
   slashes,
   stripMarkers,
   taskFromPrompt,
+  titleFromSessionAnswer,
   upgradePresence,
   FILE_WINDOW_MS,
 } from './logic'
@@ -61,6 +62,8 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const HUMAN_ORIGINS = new Set<string>(['composer', 'bridge', 'sdk'])
 // The desktop app's own read of a session: its sidebar title. Asked only when it runs without a permission prompt.
 const GET_SESSION = 'mcp__ccd_session_mgmt__get_session'
+// A Remote Control session's title lives in claude.ai: read there when the desktop app has none to give.
+const GET_REMOTE_SESSION = 'mcp__claude-code-remote__get_session'
 const LEVEL_MARK = { 1: '◦', 2: '▲', 3: '■' } as const
 const LEVEL_COLOR = { 1: 'subtle', 2: 'warning', 3: 'error' } as const
 // A shell command is watched in at most this many repos; git gets this long to list a repo's dirty files.
@@ -173,19 +176,29 @@ async function readPeers($: Api, now: number): Promise<Presence[]> {
   return peers
 }
 
-/** This session's sidebar title from the desktop app, when the app is there and lets it be read without asking. */
+/** Asks one `get_session` tool, if it is there and runs without a permission prompt; its parsed answer, or undefined. */
+async function askSession($: Api, tools: readonly { name: string }[], input: { tool: string } & Record<string, unknown>) {
+  if (!tools.some(t => t.name === input.tool)) return undefined
+  const { decision } = await $.tool.check(input as never)
+  if (decision !== 'allow') return undefined
+  const { text } = (await $.tool.call(input as never)) as { text?: string }
+  return text ? (JSON.parse(text) as unknown) : undefined
+}
+
+/** This session's title: the desktop app's sidebar, else claude.ai's for a Remote Control session. */
 async function refreshTitle($: Api) {
-  if (!me?.hostId) return
+  if (!me) return
   const tools = await $.tool.list()
-  if (!tools.some(t => t.name === GET_SESSION)) return
-  const input = { tool: GET_SESSION, session_id: 'self' } as never
-  const { decision } = await $.tool.check(input)
-  if (decision !== 'allow') return
-  const { text } = (await $.tool.call(input)) as { text?: string }
-  const answer = text ? (JSON.parse(text) as { title?: unknown }) : undefined
-  if (typeof answer?.title === 'string' && answer.title.trim()) me.title = answer.title.trim().slice(0, 120)
-  // The session that started this one, while the person has not moved it to top level.
-  if (answer) me.parentHostId = parentFromSession(answer)
+  if (me.hostId) {
+    const answer = await askSession($, tools, { tool: GET_SESSION, session_id: 'self' }).catch(() => undefined)
+    const title = titleFromSessionAnswer(answer)
+    if (title) me.title = title
+    // The session that started this one, while the person has not moved it to top level.
+    if (answer) me.parentHostId = parentFromSession(answer)
+    if (title) return
+  }
+  const remote = titleFromSessionAnswer(await askSession($, tools, { tool: GET_REMOTE_SESSION }).catch(() => undefined))
+  if (remote) me.title = remote
 }
 
 /** Tells the mother, once, that two of her daughters edit the same files. Best effort; only when she is live. */

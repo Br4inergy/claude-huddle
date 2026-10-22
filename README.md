@@ -88,7 +88,7 @@ In the Claude desktop app a session can start another one. Those two already coo
 - Sessions on different machines don't see each other. The registry is local to your computer.
 - An agent that is busy and makes no tool call gets a huddle message at the end of its turn, like any other message: the mid-turn copy and the owner warnings ride on tool calls.
 - Jumping to a session by clicking its name works in the Claude desktop app, also for a session that is not open in the window right now. In a terminal, and for a headless `claude -p` run started from a desktop session, the name is shown, not linked.
-- In the desktop app, a session reads its own sidebar title only where that read needs no permission prompt; otherwise the title arrives with your next prompt.
+- A session reads its own title from the desktop app's sidebar, or from claude.ai for a Remote Control session, only where that read needs no permission prompt; otherwise the title arrives with your next prompt.
 
 ## Files
 
