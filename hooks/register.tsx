@@ -179,7 +179,8 @@ async function readPeers($: Api, now: number): Promise<Presence[]> {
 /** Asks one `get_session` tool, if it is there and runs without a permission prompt; its parsed answer, or undefined. */
 async function askSession($: Api, tools: readonly { name: string }[], input: { tool: string } & Record<string, unknown>) {
   if (!tools.some(t => t.name === input.tool)) return undefined
-  const { decision } = await $.tool.check(input as never)
+  const { tool, ...args } = input
+  const { decision } = await $.tool.check({ tool, input: args } as never)
   if (decision !== 'allow') return undefined
   const { text } = (await $.tool.call(input as never)) as { text?: string }
   return text ? (JSON.parse(text) as unknown) : undefined
